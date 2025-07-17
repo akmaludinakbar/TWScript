@@ -1,12 +1,11 @@
-// ==UserScript==
-// @name         Tribal Wars Spy Report Scanner
-// @namespace    http://tampermonkey.net/
-// @version      2.9
-// @description  Scans multiple pages of spy reports, displays them in a UI, merges with cache, provides recommendations, and logs details.
-// @author       Your Name
-// @match        https://*.tribalwars.net/game.php*
-// @grant        GM_xmlhttpRequest
-// ==/UserScript==
+/**
+ * Tribal Wars Spy Report Scanner (Console Version)
+ * To use:
+ * 1. Open your browser's developer console (usually by pressing F12).
+ * 2. Copy this entire script and paste it into the console.
+ * 3. Press Enter. The UI will appear and the scan will start automatically.
+ * 4. You can still manually use `loadScannerCache()` or `shouldIAttack('111|222')` in the console.
+ */
 
 (function() {
     'use strict';
@@ -17,89 +16,37 @@
 
     // --- UI Creation and Management ---
 
-    /**
-     * Injects the CSS for the UI panel into the document head.
-     */
     function injectStyles() {
+        if (document.getElementById('scannerStyles')) return; // Prevent re-injecting styles
         const style = document.createElement('style');
+        style.id = 'scannerStyles';
         style.innerHTML = `
             #scannerPanel {
-                position: fixed;
-                top: 150px;
-                left: 50%;
-                transform: translateX(-50%);
-                width: 80%;
-                max-width: 900px;
-                background-color: #f4e4bc;
-                border: 2px solid #804000;
-                z-index: 10000;
-                display: none;
+                position: fixed; top: 150px; left: 50%; transform: translateX(-50%); width: 80%; max-width: 900px;
+                background-color: #f4e4bc; border: 2px solid #804000; z-index: 10000; display: none;
                 box-shadow: 5px 5px 15px rgba(0,0,0,0.5);
             }
             #scannerHeader {
-                background-color: #c1a264;
-                padding: 8px;
-                font-weight: bold;
-                cursor: move;
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
+                background-color: #c1a264; padding: 8px; font-weight: bold; cursor: move; display: flex;
+                justify-content: space-between; align-items: center;
             }
-            #scannerHeader h3 {
-                margin: 0;
-                color: #542e0a;
-            }
-            #scannerCloseBtn {
-                cursor: pointer;
-                border: 1px solid #804000;
-                background: #e9d7b4;
-                padding: 2px 8px;
-                font-weight: bold;
-            }
-            #scannerContent {
-                padding: 10px;
-                max-height: 60vh;
-                overflow-y: auto;
-            }
-            #scannerControls {
-                padding: 10px;
-                border-bottom: 1px solid #c1a264;
-                display: flex;
-                gap: 10px;
-            }
-            #scannerControls button {
-                background-color: #c1a264;
-                border: 1px solid #804000;
-                padding: 5px 10px;
-                font-weight: bold;
-                cursor: pointer;
-            }
-            #scannerControls button:hover {
-                background-color: #d1b274;
-            }
-            #reportTable {
-                width: 100%;
-                border-collapse: collapse;
-            }
-            #reportTable th, #reportTable td {
-                border: 1px solid #c1a264;
-                padding: 5px;
-                text-align: left;
-            }
-            #reportTable th {
-                background-color: #e9d7b4;
-                cursor: pointer;
-            }
+            #scannerHeader h3 { margin: 0; color: #542e0a; }
+            #scannerCloseBtn { cursor: pointer; border: 1px solid #804000; background: #e9d7b4; padding: 2px 8px; font-weight: bold; }
+            #scannerContent { padding: 10px; max-height: 60vh; overflow-y: auto; }
+            #scannerControls { padding: 10px; border-bottom: 1px solid #c1a264; display: flex; gap: 10px; }
+            #scannerControls button { background-color: #c1a264; border: 1px solid #804000; padding: 5px 10px; font-weight: bold; cursor: pointer; }
+            #scannerControls button:hover { background-color: #d1b274; }
+            #reportTable { width: 100%; border-collapse: collapse; }
+            #reportTable th, #reportTable td { border: 1px solid #c1a264; padding: 5px; text-align: left; }
+            #reportTable th { background-color: #e9d7b4; cursor: pointer; }
             #reportTable .recommend-attack { color: green; font-weight: bold; }
             #reportTable .recommend-no-attack { color: red; font-weight: bold; }
         `;
         document.head.appendChild(style);
     }
 
-    /**
-     * Creates the main UI panel and appends it to the body.
-     */
     function createUIPanel() {
+        if (document.getElementById('scannerPanel')) return; // Prevent creating multiple panels
         const panel = document.createElement('div');
         panel.id = 'scannerPanel';
         panel.innerHTML = `
@@ -116,12 +63,7 @@
                 <table id="reportTable">
                     <thead>
                         <tr>
-                            <th>Village</th>
-                            <th>Recommendation</th>
-                            <th>Send Ram?</th>
-                            <th>Received</th>
-                            <th>Resources (W/C/I)</th>
-                            <th>Wall</th>
+                            <th>Village</th><th>Recommendation</th><th>Send Ram?</th><th>Received</th><th>Resources (W/C/I)</th><th>Wall</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -132,12 +74,12 @@
         `;
         document.body.appendChild(panel);
 
-        // Add event listeners
         document.getElementById('scannerCloseBtn').addEventListener('click', () => panel.style.display = 'none');
         document.getElementById('scanBtn').addEventListener('click', fetchAndProcessMainReportPages);
         document.getElementById('loadCacheBtn').addEventListener('click', () => {
             const reports = Array.from(loadAndDeduplicateCache(false).values());
             renderReportsTable(reports);
+            panel.style.display = 'block';
         });
         document.getElementById('testLogicBtn').addEventListener('click', () => {
              const coordsToTest = prompt("Enter village coordinates to test (e.g., 111|222):");
@@ -146,78 +88,49 @@
                  alert(`Should you attack ${coordsToTest}? \n\nResult: ${result}`);
              }
         });
-
-        // Make the panel draggable
         dragElement(panel);
     }
 
-    /**
-     * Renders the report data into the UI table.
-     * @param {Array<object>} reports - The array of report objects to display.
-     */
     function renderReportsTable(reports) {
         const tbody = document.querySelector('#reportTable tbody');
-        tbody.innerHTML = ''; // Clear existing rows
-
+        tbody.innerHTML = '';
         if (!reports || reports.length === 0) {
             tbody.innerHTML = '<tr><td colspan="6">No reports found.</td></tr>';
             return;
         }
-
         reports.forEach(report => {
             const row = tbody.insertRow();
             const recommendationClass = report.recommendation === 'Attack' ? 'recommend-attack' : 'recommend-no-attack';
             const resources = report.scoutedResources;
             const resString = report.status === "Success" ? `${resources.wood || 0}/${resources.clay || 0}/${resources.iron || 0}` : 'N/A';
-
             row.innerHTML = `
-                <td>${report.village}</td>
-                <td class="${recommendationClass}">${report.recommendation}</td>
-                <td>${report.send_ram ? 'Yes' : 'No'}</td>
-                <td>${report.Received}</td>
-                <td>${resString}</td>
+                <td>${report.village}</td><td class="${recommendationClass}">${report.recommendation}</td>
+                <td>${report.send_ram ? 'Yes' : 'No'}</td><td>${report.Received}</td><td>${resString}</td>
                 <td>${report.buildings.Wall || (report.status === "Success" ? 0 : 'N/A')}</td>
             `;
         });
     }
 
-    /**
-     * Makes a UI element draggable.
-     * @param {HTMLElement} elmnt - The element to make draggable.
-     */
     function dragElement(elmnt) {
         let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
         const header = document.getElementById("scannerHeader");
-        if (header) {
-            header.onmousedown = dragMouseDown;
-        }
-
+        if (header) header.onmousedown = dragMouseDown;
         function dragMouseDown(e) {
-            e = e || window.event;
-            e.preventDefault();
-            pos3 = e.clientX;
-            pos4 = e.clientY;
-            document.onmouseup = closeDragElement;
-            document.onmousemove = elementDrag;
+            e = e || window.event; e.preventDefault();
+            pos3 = e.clientX; pos4 = e.clientY;
+            document.onmouseup = closeDragElement; document.onmousemove = elementDrag;
         }
-
         function elementDrag(e) {
-            e = e || window.event;
-            e.preventDefault();
-            pos1 = pos3 - e.clientX;
-            pos2 = pos4 - e.clientY;
-            pos3 = e.clientX;
-            pos4 = e.clientY;
+            e = e || window.event; e.preventDefault();
+            pos1 = pos3 - e.clientX; pos2 = pos4 - e.clientY;
+            pos3 = e.clientX; pos4 = e.clientY;
             elmnt.style.top = (elmnt.offsetTop - pos2) + "px";
             elmnt.style.left = (elmnt.offsetLeft - pos1) + "px";
         }
-
         function closeDragElement() {
-            document.onmouseup = null;
-            document.onmousemove = null;
+            document.onmouseup = null; document.onmousemove = null;
         }
     }
-
 
     // --- Helper Functions ---
 
@@ -270,13 +183,10 @@
         const cacheKey = getCacheKey();
         const cachedData = localStorage.getItem(cacheKey);
         const finalReportMap = new Map();
-
         if (cachedData) {
             try {
                 const reports = JSON.parse(cachedData);
-                if (logToConsole) {
-                    console.log(`TW Report Scanner: Loading and de-duplicating reports from cache for world ${getWorldId()}...`);
-                }
+                if (logToConsole) console.log(`TW Report Scanner: Loading and de-duplicating reports from cache for world ${getWorldId()}...`);
                 reports.forEach(report => {
                     if (!report || !report.villageCoordinate) return;
                     const existingReport = finalReportMap.get(report.villageCoordinate);
@@ -300,9 +210,7 @@
                 localStorage.removeItem(cacheKey);
             }
         } else {
-            if (logToConsole) {
-                console.log(`TW Report Scanner: No cached data found for world ${getWorldId()}.`);
-            }
+            if (logToConsole) console.log(`TW Report Scanner: No cached data found for world ${getWorldId()}.`);
         }
         return finalReportMap;
     }
@@ -311,6 +219,7 @@
 
     async function fetchAndProcessMainReportPages() {
         console.log(`TW Report Scanner: Starting scan of ${PAGES_TO_SCAN} report pages...`);
+        document.getElementById('scannerPanel').style.display = 'block';
         document.getElementById('scanBtn').textContent = 'Scanning...';
         const cachedReportMap = loadAndDeduplicateCache(false);
         console.log(`TW Report Scanner: Loaded ${cachedReportMap.size} unique reports from cache to begin merge.`);
@@ -325,23 +234,17 @@
         try {
             const reportListDocs = await Promise.all(pagePromises);
             const allDetailPromises = [];
-
             for (const doc of reportListDocs) {
-                if (doc) {
-                     processReportList(doc, allDetailPromises);
-                }
+                if (doc) processReportList(doc, allDetailPromises);
             }
-
             if (allDetailPromises.length === 0) {
                 console.log("TW Report Scanner: No new spy reports found across all scanned pages.");
                 saveToCache(Array.from(cachedReportMap.values()));
                 document.getElementById('scanBtn').textContent = 'Scan Reports';
                 return;
             }
-
             console.log(`TW Report Scanner: Waiting for ${allDetailPromises.length} reports to load...`);
             const newlyScannedReports = (await Promise.all(allDetailPromises)).filter(r => r !== null);
-
             newlyScannedReports.forEach(newReport => {
                 const existingReport = cachedReportMap.get(newReport.villageCoordinate);
                 if (!existingReport) {
@@ -354,11 +257,9 @@
                     }
                 }
             });
-
             const finalMergedData = Array.from(cachedReportMap.values());
-            renderReportsTable(finalMergedData); // Render the data to the UI
+            renderReportsTable(finalMergedData);
             saveToCache(finalMergedData);
-
         } catch (error) {
             console.error("TW Report Scanner: An error occurred while fetching report pages.", error);
         } finally {
@@ -366,26 +267,20 @@
         }
     }
 
-    function fetchReportListPage(url) {
-        return new Promise((resolve) => {
-             GM_xmlhttpRequest({
-                method: 'GET',
-                url: url,
-                onload: function(response) {
-                    if (response.status >= 200 && response.status < 300) {
-                        const parser = new DOMParser();
-                        resolve(parser.parseFromString(response.responseText, 'text/html'));
-                    } else {
-                        console.error(`TW Report Scanner: Failed to fetch report page at ${url}. Status: ${response.status}`);
-                        resolve(null);
-                    }
-                },
-                onerror: function(error) {
-                    console.error(`TW Report Scanner: Error fetching report page at ${url}.`, error);
-                    resolve(null);
-                }
-            });
-        });
+    async function fetchReportListPage(url) {
+        try {
+            const response = await fetch(url);
+            if (!response.ok) {
+                console.error(`TW Report Scanner: Failed to fetch report page at ${url}. Status: ${response.status}`);
+                return null;
+            }
+            const text = await response.text();
+            const parser = new DOMParser();
+            return parser.parseFromString(text, 'text/html');
+        } catch (error) {
+            console.error(`TW Report Scanner: Error fetching report page at ${url}.`, error);
+            return null;
+        }
     }
 
     function processReportList(doc, reportDetailPromises) {
@@ -407,26 +302,19 @@
         }
     }
 
-    function fetchReportDetails(url, villageCoords, receivedDate) {
-        return new Promise((resolve) => {
-            GM_xmlhttpRequest({
-                method: 'GET',
-                url: url,
-                onload: function(response) {
-                    if (response.status >= 200 && response.status < 300) {
-                        const reportData = parseReportPage(response.responseText, villageCoords, receivedDate);
-                        resolve(reportData);
-                    } else {
-                        console.error(`TW Report Scanner: Failed to fetch report at ${url}. Status: ${response.status}`);
-                        resolve(null);
-                    }
-                },
-                onerror: function(error) {
-                    console.error(`TW Report Scanner: Error fetching report details from ${url}.`, error);
-                    resolve(null);
-                }
-            });
-        });
+    async function fetchReportDetails(url, villageCoords, receivedDate) {
+        try {
+            const response = await fetch(new URL(url, window.location.origin));
+            if (!response.ok) {
+                console.error(`TW Report Scanner: Failed to fetch report at ${url}. Status: ${response.status}`);
+                return null;
+            }
+            const text = await response.text();
+            return parseReportPage(text, villageCoords, receivedDate);
+        } catch (error) {
+            console.error(`TW Report Scanner: Error fetching report details from ${url}.`, error);
+            return null;
+        }
     }
 
     function parseReportPage(htmlText, villageCoords, receivedDate) {
@@ -438,19 +326,13 @@
         const espionageTable = doc.querySelector('#attack_spy_resources');
         if (!espionageTable) {
             return {
-                village: villageNameAndCoords,
-                recommendation: "Do Not Attack (Failed Spy Mission)",
-                send_ram: false,
-                Received: receivedDate,
-                villageCoordinate: villageCoords,
-                status: "Failed Spy Mission (No Data)",
-                scoutedResources: {},
-                buildings: {}
+                village: villageNameAndCoords, recommendation: "Do Not Attack (Failed Spy Mission)",
+                send_ram: false, Received: receivedDate, villageCoordinate: villageCoords,
+                status: "Failed Spy Mission (No Data)", scoutedResources: {}, buildings: {}
             };
         }
         const resources = {};
-        const resourceSpans = espionageTable.querySelectorAll('span.nowrap');
-        resourceSpans.forEach(span => {
+        espionageTable.querySelectorAll('span.nowrap').forEach(span => {
             const resourceTypeElement = span.querySelector('span[data-title], span[title]');
             if(resourceTypeElement) {
                 const type = (resourceTypeElement.getAttribute('data-title') || resourceTypeElement.getAttribute('title')).toLowerCase();
@@ -488,14 +370,9 @@
         }
         const send_ram = recommendation.includes("Wall too high");
         return {
-            village: villageNameAndCoords,
-            recommendation: recommendation,
-            send_ram: send_ram,
-            Received: receivedDate,
-            villageCoordinate: villageCoords,
-            status: "Success",
-            scoutedResources: resources,
-            buildings: buildings
+            village: villageNameAndCoords, recommendation: recommendation, send_ram: send_ram,
+            Received: receivedDate, villageCoordinate: villageCoords, status: "Success",
+            scoutedResources: resources, buildings: buildings
         };
     }
 
@@ -521,24 +398,24 @@
         }
     }
 
-    // --- Script Initialization ---
-    window.addEventListener('load', function() {
+    // --- Script Initialization and Global Exposure ---
+    function initialize() {
         injectStyles();
         createUIPanel();
+        console.log("Tribal Wars Spy Report Scanner initialized. Automatically starting scan...");
+        // Automatically start the scan and show the UI
+        fetchAndProcessMainReportPages();
+    }
 
-        const menuBar = document.getElementById('menu_row');
-        if (menuBar) {
-            const toggleButtonCell = document.createElement('td');
-            toggleButtonCell.className = 'menu-item';
-            toggleButtonCell.innerHTML = `<a href="#"><span>Report Scanner</span></a>`;
-            toggleButtonCell.querySelector('a').style.cssText = "color: #006400 !important; font-weight: bold;";
-            toggleButtonCell.addEventListener('click', (e) => {
-                e.preventDefault();
-                const panel = document.getElementById('scannerPanel');
-                panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
-            });
-            menuBar.appendChild(toggleButtonCell);
-        }
-    });
+    // Expose functions to the global window object so they can be called from the console
+    window.runScanner = fetchAndProcessMainReportPages;
+    window.loadScannerCache = () => {
+        const reports = Array.from(loadAndDeduplicateCache(false).values());
+        renderReportsTable(reports);
+        document.getElementById('scannerPanel').style.display = 'block';
+    };
+    window.shouldIAttack = shouldAttackVillage;
+
+    initialize();
 
 })();
