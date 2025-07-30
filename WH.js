@@ -1621,13 +1621,7 @@ function displayEverything() {
     }
 }
 
-const premium=document.querySelector('#quickbar_outer');
-        if(premium){
-               if ((window.location.href.includes("screen=overview_villages&intro")||window.location.href.includes("screen=overview_villages"))) {
 
-           displayEverything();
-               }
-        }
 
 
 // ... (rest of the helper functions from original script like checkDistance, numberWithCommas, etc.)
