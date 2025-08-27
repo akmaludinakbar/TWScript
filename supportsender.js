@@ -138,7 +138,6 @@
                 <div id="defense_table_container" style="margin-top:10px;"></div>
             </div>
         </div>
-        <div class="scriptFooter"><h5>made by Costache | Enhanced by Gemini</h5></div>
     </div>`;
         $("#div_container").remove();
         if ($("#contentContainer").length > 0) { $("#contentContainer").eq(0).prepend(html); } else { $("#mobileContent").eq(0).prepend(html); }
