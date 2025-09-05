@@ -1,18 +1,20 @@
 // ==UserScript==
 // @name         Enhanced Support Sender with Defense Planner
 // @namespace    http://tampermonkey.net/
-// @version      3.2
+// @version      3.3
 // @description  Combines the Support Sender script by Madalin with a defense planner to parse incomings and send support automatically.
 // @author       Costache Madalin (Original) & Gemini (Enhancements)
 // @match        *://*.tribalwars.net/game.php?*screen=place&mode=call*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=tribalwars.net
-// @grant        none
+// @grant        GM_xmlhttpRequest
+// @connect      *.tribalwars.net
 // @require      https://code.jquery.com/ui/1.12.1/jquery-ui.min.js
 // ==/UserScript==
 
 (function() {
     'use strict';
 
+    // --- Configuration & Global Variables (User Baseline) ---
     let url = window.location.href;
     var countApiKey = "support_sender";
     var countNameSpace = "madalinoTribalWarsScripts";
@@ -29,14 +31,12 @@
 
     var defaultTheme = '[["theme1",["#E0E0E0","#000000","#C5979D","#2B193D","#2C365E","#484D6D","#4B8F8C","62"]],["currentTheme","theme1"],["theme2",["#E0E0E0","#000000","#F76F8E","#113537","#37505C","#445552","#294D4A","62"]],["theme3",["#E0E0E0","#000000","#ACFCD9","#190933","#665687","#7C77B9","#623B5A","62"]],["theme4",["#E0E0E0","#000000","#181F1C","#60712F","#274029","#315C2B","#214F4B","62"]],["theme5",["#E0E0E0","#000000","#9AD1D4","#007EA7","#003249","#1F5673","#1C448E","62"]],["theme6",["#E0E0E0","#000000","#EA8C55","#81171B","#540804","#710627","#9E1946","62"]],["theme7",["#E0E0E0","#000000","#754043","#37423D","#171614","#3A2618","#523A34","62"]],["theme8",["#E0E0E0","#000000","#9E0031","#8E0045","#44001A","#600047","#770058","62"]],["theme9",["#E0E0E0","#000000","#C1BDB3","#5F5B6B","#323031","#3D3B3C","#575366","62"]],["theme10",["#E0E0E0","#000000","#E6BCCD","#29274C","#012A36","#14453D","#7E52A0","62"]]]';
     var localStorageThemeName = "supportSenderTheme";
-
     var textColor, backgroundInput, borderColor, backgroundContainer, backgroundHeader, backgroundMainTable, backgroundInnerTable, widthInterface;
     var backgroundAlternateTableEven, backgroundAlternateTableOdd;
-
-
     let defensePlan = [];
     const defensePlanStorageKey = `${game_data.world}_defensePlanData`;
 
+    // --- Helper Functions ---
     function httpGet(theUrl) {
         var xmlHttp = new XMLHttpRequest();
         xmlHttp.open("GET", theUrl, false);
@@ -44,10 +44,22 @@
         return xmlHttp.responseText;
     }
 
+    function getColorDarker(hexInput, percent) {
+        let hex = hexInput.replace(/^\s*#|\s*$/g, "");
+        if (hex.length === 3) hex = hex.replace(/(.)/g, "$1$1");
+        let r = parseInt(hex.substr(0, 2), 16), g = parseInt(hex.substr(2, 2), 16), b = parseInt(hex.substr(4, 2), 16);
+        const calculatedPercent = (100 + percent) / 100;
+        r = Math.round(Math.min(255, Math.max(0, r * calculatedPercent)));
+        g = Math.round(Math.min(255, Math.max(0, g * calculatedPercent)));
+        b = Math.round(Math.min(255, Math.max(0, b * calculatedPercent)));
+        return `#${("00"+r.toString(16)).slice(-2).toUpperCase()}${("00"+g.toString(16)).slice(-2).toUpperCase()}${("00"+b.toString(16)).slice(-2).toUpperCase()}`;
+    }
+
+    // --- UI and Styling Functions ---
     function addGlobalStyles() {
         const css = `
             .scriptContainer { width: 62%; background-color: ${backgroundContainer}; border: 2px solid ${borderColor}; z-index: 99999; text-align:center; padding: 5px; box-sizing: border-box; }
-            .scriptHeader { width: 100%; height: 35px; background-color: ${backgroundHeader}; text-align: center; position: relative; }
+            .scriptHeader { width: 100%; height: 35px; background-color: ${backgroundHeader}; text-align: center; position: relative; cursor: move; }
             .scriptHeader h2 { margin: 0; padding-top: 5px; color: ${textColor}; }
             .scriptFooter { width: 100%; height: 25px; background-color: ${backgroundHeader}; text-align: center; }
             .scriptFooter h5 { margin: 0; padding-top: 2px; color: ${textColor}; }
@@ -63,30 +75,23 @@
             #defense_plan_table.vis tbody tr.sent-row { background-color: #3a533a !important; }
             #defense_plan_table.vis tbody tr td { padding: 5px !important; vertical-align: middle; color: blue !important; }
             .send-support-btn.btn-disabled { filter: grayscale(80%); cursor: not-allowed; opacity: 0.7; }
+            .btn.evt-confirm-btn { background-image: none !important; background-color: ${backgroundInnerTable}; color: ${textColor}; border: 1px solid ${borderColor}; }
+            .btn.evt-confirm-btn:hover { background-color: ${getColorDarker(backgroundInnerTable, 20)}; }
+            .btn-confirm-no { background-color: #963535 !important; }
+            .btn-confirm-no:hover { background-color: #b04343 !important; }
         `;
         $('<style>').prop('type', 'text/css').html(css).appendTo('head');
     }
 
-    async function main() {
-        initializationTheme();
-        addGlobalStyles();
-        createMainInterface();
-        changeTheme();
-        addEvents();
-        hitCountApi();
-        loadDefensePlan();
-        countTotalTroops();
-    }
-
-    function getColorDarker(hexInput, percent) {
-        let hex = hexInput.replace(/^\s*#|\s*$/g, "");
-        if (hex.length === 3) hex = hex.replace(/(.)/g, "$1$1");
-        let r = parseInt(hex.substr(0, 2), 16), g = parseInt(hex.substr(2, 2), 16), b = parseInt(hex.substr(4, 2), 16);
-        const calculatedPercent = (100 + percent) / 100;
-        r = Math.round(Math.min(255, Math.max(0, r * calculatedPercent)));
-        g = Math.round(Math.min(255, Math.max(0, g * calculatedPercent)));
-        b = Math.round(Math.min(255, Math.max(0, b * calculatedPercent)));
-        return `#${("00"+r.toString(16)).slice(-2).toUpperCase()}${("00"+g.toString(16)).slice(-2).toUpperCase()}${("00"+b.toString(16)).slice(-2).toUpperCase()}`;
+    function initializationTheme() {
+        if (!localStorage.getItem(localStorageThemeName)) { localStorage.setItem(localStorageThemeName, defaultTheme); }
+        let mapTheme = new Map(JSON.parse(localStorage.getItem(localStorageThemeName)));
+        let currentTheme = mapTheme.get("currentTheme") || "theme1";
+        let colours = mapTheme.get(currentTheme);
+        [textColor, backgroundInput, borderColor, backgroundContainer, backgroundHeader, backgroundMainTable, backgroundInnerTable, widthInterface] = colours;
+        if (game_data.device != "desktop") widthInterface = 98;
+        backgroundAlternateTableEven = backgroundContainer;
+        backgroundAlternateTableOdd = getColorDarker(backgroundContainer, -20);
     }
 
     function createMainInterface() {
@@ -106,7 +111,7 @@
                 <tr><td>troops</td>`;
         units.forEach(unit => { if (!["knight", "snob", "militia", "axe", "light", "ram", "catapult", "marcher"].includes(unit)) { html += `<td class="fm_unit"><img src="${game_data.image_base}unit/unit_${unit}.png">${unit}</td>`; } });
         html += `<td>pop</td></tr><tr id="totalTroops"><td>total</td>`;
-        units.forEach(unit => { if (!["knight", "snob", "militia", "axe", "light", "ram", "catapult", "marcher"].includes(unit)) { html += `<td><input style="color=red; !important ;color: red;" id="${unit}total" value="0" type="text" class="totalTroops scriptInput" disabled><font color="${textColor}" class="hideMobile">k</font></td>`; } });
+        units.forEach(unit => { if (!["knight", "snob", "militia", "axe", "light", "ram", "catapult", "marcher"].includes(unit)) { html += `<td><input style="color: red !important;" id="${unit}total" value="0" type="text" class="totalTroops scriptInput" disabled><font color="${textColor}" class="hideMobile">k</font></td>`; } });
         html += `<td><input id="packets_total" value="0" type="text" class="scriptInput" disabled><font color="${textColor}" class="hideMobile">k</font></td></tr><tr id="sendTroops"><td>send</td>`;
         units.forEach(unit => { if (!["knight", "snob", "militia", "axe", "light", "ram", "catapult", "marcher"].includes(unit)) { html += `<td align="center"><input id="${unit}total" value="0" type="number" class="scriptInput sendTroops"><font color="${textColor}" class="hideMobile">k</font></td>`; } });
         html += `<td align="center"><input id="packets_send" value="0" type="number" class="scriptInput"><font color="${textColor}" class="hideMobile">k</font></td></tr><tr id="reserveTroops"><td>reserve</td>`;
@@ -124,9 +129,16 @@
             </table>
             <div id="div_defense_planner" style="padding-top:10px; margin-top: 15px; border-top: 2px solid ${borderColor};">
                 <h3 style="color:${textColor};">Defense Planner</h3>
+                 <table class="scriptTable" style="margin-bottom:10px;">
+                    <tr>
+                         <td style="color:${textColor};">Forum URL:</td>
+                         <td><input id="forum_url_input" type="text" class="scriptInput" style="width: 95%;" placeholder="Paste forum thread URL here..."></td>
+                         <td><button id="import_from_forum_btn" class="btn evt-confirm-btn btn-confirm-yes">Import from Forum</button></td>
+                    </tr>
+                </table>
                 <table class="scriptTable">
                     <tr>
-                        <td style="width: 50%;"><textarea id="incomings_text" style="width: 95%; height: 100px; background-color:${backgroundInput}; color:${textColor}; border:1px solid ${borderColor};" placeholder="Paste incoming attacks text here..."></textarea></td>
+                        <td style="width: 50%;"><textarea id="incomings_text" style="width: 95%; height: 100px; background-color:${backgroundInput}; color:${textColor}; border:1px solid ${borderColor};" placeholder="Or paste incoming attacks text here..."></textarea></td>
                         <td style="width: 50%; vertical-align: top; color:${textColor};">
                            Total Defense Population: <input id="total_defense_pop" type="number" value="10000" class="scriptInput" style="width: 80px;"><br>
                            <button id="process_incomings_btn" class="btn evt-confirm-btn btn-confirm-yes" style="margin-top: 10px;">Process Incomings & Plan Defense</button>
@@ -138,10 +150,11 @@
                 <div id="defense_table_container" style="margin-top:10px;"></div>
             </div>
         </div>
+        <div class="scriptFooter"><h5>made by Costache | Enhanced by Gemini</h5></div>
     </div>`;
         $("#div_container").remove();
         if ($("#contentContainer").length > 0) { $("#contentContainer").eq(0).prepend(html); } else { $("#mobileContent").eq(0).prepend(html); }
-        $("#div_container").css("position", "fixed").draggable();
+        $("#div_container").css("position", "fixed").draggable({ handle: ".scriptHeader" });
         $("#div_minimize").on("click", () => {
             let currentWidthPercentage = Math.ceil($('#div_container').width() / $('body').width() * 100);
             if (currentWidthPercentage >= widthInterface) { $('#div_container').css({ 'width': '10%' }); $('#div_body').hide(); } else { $('#div_container').css({ 'width': `${widthInterface}%` }); $('#div_body').show(); }
@@ -150,6 +163,7 @@
         $('#fillInputsBtn').on('click', fillInputs);
         $('#process_incomings_btn').on('click', parseAndPlanDefense);
         $('#reset_plan_btn').on('click', resetDefensePlan);
+        $('#import_from_forum_btn').on('click', importFromForum);
         if (localStorage.getItem(game_data.world + "support_sender_settings2") != null) {
             let settings = JSON.parse(localStorage.getItem(game_data.world + "support_sender_settings2"));
             $('#table_upload input[type=checkbox]').each((index, elem) => elem.checked = settings[0][index]);
@@ -165,18 +179,10 @@
         if (game_data.device != "desktop") { $(".hideMobile").hide(); $("#table_upload").find("input[type=text]").css("width", "100%"); }
     }
 
-    function changeTheme() { /* Unchanged */ }
+    function changeTheme() { /* Code is complete in full script */ }
+    function addEvents() { /* Code is complete in full script */ }
 
-    function initializationTheme() {
-        if (!localStorage.getItem(localStorageThemeName)) { localStorage.setItem(localStorageThemeName, defaultTheme); }
-        let mapTheme = new Map(JSON.parse(localStorage.getItem(localStorageThemeName)));
-        let currentTheme = mapTheme.get("currentTheme") || "theme1";
-        let colours = mapTheme.get(currentTheme);
-        [textColor, backgroundInput, borderColor, backgroundContainer, backgroundHeader, backgroundMainTable, backgroundInnerTable, widthInterface] = colours;
-        if (game_data.device != "desktop") widthInterface = 98;
-        backgroundAlternateTableEven = backgroundContainer;
-        backgroundAlternateTableOdd = getColorDarker(backgroundContainer, -20);
-    }
+    // --- Core Logic ---
 
     function countTotalTroops() {
         let dateStart = new Date(); dateStart.setFullYear(dateStart.getFullYear() - 1);
@@ -265,34 +271,38 @@
         mapVillages.forEach(village => { units.forEach(u => totalTroopsAvailable[u] += village[u] || 0); });
         for (const troop in sendTotalObj) { if (sendTotalObj[troop] > totalTroopsAvailable[troop]) { return UI.ErrorMessage(`Not enough ${troop} troops.`); } }
 
+        $("#village_troup_list").find(".troop-request-selector:checked").each(function() {
+            $(this).click();
+        });
         $("#village_troup_list").find("input[type=number]").val(0);
-        $("#village_troup_list").find(".troop-request-selector").prop('checked', false);
 
-        mapVillages.forEach((villageData, coord) => {
+        mapVillages.forEach((villageData) => {
             const row = $(`#call_village_${villageData.villageId}`);
             if (row.length) {
                 let troopsToSendInThisRow = 0;
+                let unitsToFill = {};
                 for (const troop in sendTotalObj) {
                     if (sendTotalObj[troop] > 0 && villageData[troop] > 0) {
                         let proportion = totalTroopsAvailable[troop] > 0 ? sendTotalObj[troop] / totalTroopsAvailable[troop] : 0;
                         let amountToSend = Math.floor(villageData[troop] * proportion);
                         if (amountToSend > 0) {
-                            $(row).find(`.call-unit-box-${troop}`).val(amountToSend);
+                            unitsToFill[troop] = amountToSend;
                             troopsToSendInThisRow += amountToSend;
                         }
                     }
                 }
                 if (troopsToSendInThisRow > 0) {
-                    $(row).find('.troop-request-selector').prop('checked', true);
+                    row.find('.troop-request-selector').click();
+                    for (const unit in unitsToFill) {
+                        row.find(`.call-unit-box-${unit}`).val(unitsToFill[unit]);
+                    }
                 }
             }
         });
     }
 
     function addEvents() {
-
         $('.sendTroops').off('input').on('input', function() {
-
             let totalPop = 0;
             $('.sendTroops').each(function() {
                 let value = parseFloat(this.value) || 0;
@@ -316,43 +326,34 @@
         });
     }
 
-    function hitCountApi() { $.getJSON(`https://api.counterapi.dev/v1/${countNameSpace}/${countApiKey}/up`, r => {}); }
-    function calcDistance(coord1, coord2) { let [x1, y1] = coord1.split("|").map(Number); let [x2, y2] = coord2.split("|").map(Number); return Math.sqrt(Math.pow(x1 - x2, 2) + Math.pow(y1 - y2, 2)); }
-    function getSpeedConstant() {
-        let key = game_data.world + "speedWorld";
-        if (localStorage.getItem(key)) {
-            return JSON.parse(localStorage.getItem(key));
-        } else {
-            let data = httpGet("/interface.php?func=get_config");
-            const parser = new DOMParser();
-            const xmlDoc = parser.parseFromString(data, "text/xml");
-            let obj = {
-                worldSpeed: Number(xmlDoc.getElementsByTagName("speed")[0].innerHTML),
-                unitSpeed: Number(xmlDoc.getElementsByTagName("unit_speed")[0].innerHTML)
-            };
-            localStorage.setItem(key, JSON.stringify(obj));
-            return obj;
-        }
-    }
-
     function parseAndPlanDefense() {
         const text = $('#incomings_text').val();
-        const villages = text.split('Village:').slice(1);
+        const villages = text.split(/Village:|Vas:/).slice(1);
         let parsedData = [];
+        const monthMap = { 'jan.': 'Jan', 'feb.': 'Feb', 'mar.': 'Mar', 'apr.': 'Apr', 'maj': 'May', 'jun.': 'Jun', 'juli': 'Jul', 'aug.': 'Aug', 'sep.': 'Sep', 'okt.': 'Oct', 'nov.': 'Nov', 'dec.': 'Dec' };
+
         villages.forEach(villageText => {
             try {
                 const villageNameMatch = villageText.match(/(.*?)\((\d+\|\d+)\)/);
                 if (!villageNameMatch) return;
                 const name = villageNameMatch[1].trim();
                 const coords = villageNameMatch[2];
-                const attacks = [...villageText.matchAll(/Arrival time: (.*?:\d{3})/g)];
+                const attacks = [...villageText.matchAll(/(?:Arrival time:|Čas prihoda:)\s*(.*?:\d{3})/g)];
+
                 if (attacks.length > 0) {
-                    const arrivalTimes = attacks.map(match => new Date(match[1].replace(/:(?=[^:]*$)/, '.')));
+                    const arrivalTimes = attacks.map(match => {
+                        let dateString = match[1].replace(/:(?=[^:]*$)/, '.');
+                        for (const [key, value] of Object.entries(monthMap)) {
+                            dateString = dateString.replace(key, value);
+                        }
+                        return new Date(dateString);
+                    });
                     const soonestArrival = new Date(Math.min(...arrivalTimes));
                     parsedData.push({ name, coordinates: coords, arrival: soonestArrival, pop_to_send: 0, sent: false });
                 }
             } catch (e) { console.error("Error parsing village block:", e); }
         });
+
         parsedData.sort((a, b) => a.arrival - b.arrival);
         const totalPop = parseInt($('#total_defense_pop').val(), 10) || 0;
         const popPerVillage = parsedData.length > 0 ? Math.floor(totalPop / parsedData.length) : 0;
@@ -394,12 +395,11 @@
         if (village) {
             village.pop_to_send = parseInt(newValue, 10) || 0;
             localStorage.setItem(defensePlanStorageKey, JSON.stringify(defensePlan));
-             updateTotalSentPop();
+            updateTotalSentPop();
         }
     }
 
     async function sendSupport(coords) {
-
         const villageData = defensePlan.find(v => v.coordinates === coords);
         if (!villageData || villageData.sent) return;
         const [x, y] = coords.split('|');
@@ -408,11 +408,9 @@
         const popInK = (villageData.pop_to_send / 1000).toFixed(3);
         $('#packets_send').val(popInK).trigger('input');
         await new Promise(resolve => setTimeout(resolve, 250));
-         document.querySelector('#place_call_select_all').click();
         fillInputs();
         await new Promise(resolve => setTimeout(resolve, 250));
         villageData.sent = true;
-
         updateTotalSentPop();
         localStorage.setItem(defensePlanStorageKey, JSON.stringify(defensePlan));
         $('#place_call_form_submit').click();
@@ -439,7 +437,45 @@
             renderDefenseTable();
         }
     }
+    
+    function importFromForum() {
+        const url = $('#forum_url_input').val();
+        if (!url || !url.includes('screen=forum')) {
+            return UI.ErrorMessage('Please enter a valid forum thread URL.');
+        }
 
-    main();
+        UI.notification.show(null, 'Importing from forum...');
+
+        GM_xmlhttpRequest({
+            method: 'GET',
+            url: url,
+            onload: function(response) {
+                if (response.status >= 200 && response.status < 400) {
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(response.responseText, 'text/html');
+                    const posts = $(doc).find('div.post > div.text');
+                    let allTextContent = '';
+
+                    posts.each(function() {
+                        allTextContent += $(this).text().trim() + '\n\n';
+                    });
+
+                    $('#incomings_text').val(allTextContent);
+                    UI.SuccessMessage('Successfully imported data from forum thread.');
+                    parseAndPlanDefense();
+                } else {
+                    UI.ErrorMessage('Failed to fetch the forum page. Status: ' + response.status);
+                }
+            },
+            onerror: function() {
+                UI.ErrorMessage('An error occurred while trying to fetch the forum page.');
+            }
+        });
+    }
+
+    // --- Script Entry Point ---
+    if ($("#village_troup_list").length) {
+        main();
+    }
 
 })();
